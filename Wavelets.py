@@ -1,10 +1,11 @@
-import pywt
+import os
 import numpy as np
 import matplotlib.pyplot as plt
 from scipy.special import hermitenorm
 
 class Wavelet:
     def __init__(self, wavelet_name):
+        
         self._wavelet_name = wavelet_name.lower()
         self._signal_length = 2400   # длина записи в мс
         self._sample_rate = 2        # шаг выборки в мс
@@ -12,6 +13,8 @@ class Wavelet:
         self._dom_freq = 10          # центральная частота в Гц
         self._num_iter = 6           # кол-во циклов
 
+        self.file_path = 'coefficients.bln'
+    
         # Инициализация зависимых переменных
         self._update_dependent_variables()
 
@@ -254,26 +257,19 @@ class Wavelet:
         return phi_resampled
 
     def symlet_coefficients(self, name, N):
-        """
-        Выдает коэффициенты уравнения вейвлетов Добеши (dbN, symN, coifN)
-    
-        Параметры:
-            name (str): Принимает значения db, sym, coif (Daubechies, Symlets, Coiflet)
-            N (int): Порядок вейвлета.
-    
-        Возвращает:
-            coef (numpy.ndarray): Коэффициенты уравнения.
-        """
+        """Считывает коэффициенты из файла."""
+        key = f"{name}{N}"
+        if os.path.getsize(self.file_path) > 0:
+            with open(self.file_path, 'r') as file:
+                data = eval(file.read())  # Преобразуем строку в словарь
+                if key in data:
+                    return np.array(data[key])
 
-        wavelet_name = f"{name}{N}"
-        wavelet = pywt.Wavelet(wavelet_name)
-        coef = np.array(wavelet.dec_lo)
-    
-        return coef
+        raise ValueError(f"Коэффициенты для {key} не найдены.")
 
 if __name__ == "__main__":
     
-    app = Wavelet("morlet3")              # передаем название вейвлета
+    app = Wavelet("sym16")              # передаем название вейвлета
     
     graph = app.generate_wavelet()      # построение вейвлета
     plt.plot(graph)

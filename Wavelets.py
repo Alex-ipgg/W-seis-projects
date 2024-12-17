@@ -3,7 +3,9 @@ import numpy as np
 import matplotlib.pyplot as plt
 from scipy.special import hermitenorm
 
+
 class Wavelet:
+    
     def __init__(self, wavelet_name):
         
         self._wavelet_name = wavelet_name.lower()
@@ -11,15 +13,7 @@ class Wavelet:
         self._sample_rate = 2        # шаг выборки в мс
         self._central_time = 1200    # центральное время импульса в мс
         self._dom_freq = 10          # центральная частота в Гц
-        self._num_iter = 6           # кол-во циклов
-
-        self.file_path = 'coefficients.bln'
-    
-        # Инициализация зависимых переменных
-        self._update_dependent_variables()
-
-    def _update_dependent_variables(self):
-        """Обновление зависимых переменных при изменении основных свойств."""
+        self._num_cycles = 6           # кол-во циклов
         
         # Преобразование значений в секунды
         self._signal_length_sec = self._signal_length / 1000.0
@@ -28,86 +22,104 @@ class Wavelet:
 
         self._time = np.arange(0, self._signal_length_sec, self._sample_rate_sec)       # Массив времени
         self._time_shifted = self._time - self._central_time_sec                        # Массив времени, центрированный вокруг t_0
-        self._sigma = self._num_iter / (2 * np.pi * self._dom_freq)                     # Стандартное отклонение
+        self._sigma = self._num_cycles / (2 * np.pi * self._dom_freq)                     # Стандартное отклонение
 
+        self.file_path = 'coefficients.bln'
+        
     @property
     def signal_length(self):
         """Длина записи в мс."""
+        
         return self._signal_length
 
     @signal_length.setter
     def signal_length(self, value):
+        
         self._signal_length = value
         self._update_dependent_variables()
 
     @property
     def sample_rate(self):
         """Шаг выборки в мс."""
+        
         return self._sample_rate
 
     @sample_rate.setter
     def sample_rate(self, value):
+        
         self._sample_rate = value
         self._update_dependent_variables()
 
     @property
     def central_time(self):
         """Центральное время импульса в мс."""
+        
         return self._central_time
 
     @central_time.setter
     def central_time(self, value):
+        
         self._central_time = value
         self._update_dependent_variables()
     
     @property
     def dom_freq(self):
         """Центральная частота в Гц."""
+        
         return self._dom_freq
 
     @dom_freq.setter
     def dom_freq(self, value):
+        
         self._dom_freq = value
         self._update_dependent_variables()
     
     @property
-    def num_iter(self):
+    def num_cycles(self):
         """Количество циклов."""
-        return self._num_iter
+        
+        return self._num_cycles
 
-    @num_iter.setter
-    def num_iter(self, value):
-        self._num_iter = value
+    @num_cycles.setter
+    def num_cycles(self, value):
+        
+        self._num_cycles = value
         self._update_dependent_variables()
     
     @property
     def signal_length_sec(self):
         """Длина записи в секундах."""
+        
         return self._signal_length_sec
 
     @property
     def sample_rate_sec(self):
         """Шаг выборки в секундах."""
+        
         return self._sample_rate_sec
 
     @property
     def central_time_sec(self):
         """Центральное время импульса в секундах."""
+        
         return self._central_time_sec
 
     @property
     def time(self):
         """Массив времени."""
+        
         return self._time
 
     @property
     def time_shifted(self):
         """Массив времени, центрированный вокруг t_0."""
+        
         return self._time_shifted
 
     @property
     def sigma(self):
         """Стандартное отклонение."""
+        
         return self._sigma
 
     def generate_wavelet(self):
@@ -145,6 +157,7 @@ class Wavelet:
         Возвращает:
             wavelet_list (numpy.ndarray): Список с названиями доступных вейвлетов.
         """
+        
         wavelet_list = ['ricker'] + \
             [f"morlet{n}" for n in range(1, 4)] + \
             [f"db{n}" for n in range(4, 21, 2)] + \
@@ -241,7 +254,7 @@ class Wavelet:
         phi = np.array([1.0])  # Инициализация phi_0(t)
 
         # Выполнение итераций каскадного алгоритма для вычисления phi(t)
-        for _ in range(self.num_iter):
+        for _ in range(self.num_cycles):
             # Увеличение дискретизации phi
             phi_up = upsample(phi)
             # Свертка с коэффициентами масштабирования h
@@ -257,7 +270,17 @@ class Wavelet:
         return phi_resampled
 
     def symlet_coefficients(self, name, N):
-        """Считывает коэффициенты из файла."""
+        """
+        Выдает коэффициенты уравнения вейвлетов Добеши (dbN, symN, coifN)
+    
+        Параметры:
+            name (str): Принимает значения db, sym, coif (Daubechies, Symlets, Coiflet)
+            N (int): Порядок вейвлета.
+    
+        Возвращает:
+            coef (numpy.ndarray): Коэффициенты уравнения.
+        """
+        
         key = f"{name}{N}"
         if os.path.getsize(self.file_path) > 0:
             with open(self.file_path, 'r') as file:
@@ -269,10 +292,7 @@ class Wavelet:
 
 if __name__ == "__main__":
     
-    app = Wavelet("sym16")              # передаем название вейвлета
+    app = Wavelet("sym4")              # передаем название вейвлета
     
     graph = app.generate_wavelet()      # построение вейвлета
     plt.plot(graph)
-    
-    # names = app.get_wavelet_list()    # так же можно посмотреть список доступных вейвлетов
-    # print(names)

@@ -11,7 +11,7 @@ class Wavelet:
         self._wavelet_name = wavelet_name.lower()
         self._signal_length = 2400   # длина записи в мс
         self._sample_rate = 2        # шаг выборки в мс
-        self._central_time = 1200    # центральное время импульса в мс
+        self._central_time = 1000    # центральное время импульса в мс
         self._dom_freq = 10          # центральная частота в Гц
         self._num_cycles = 6           # кол-во циклов
         
@@ -24,7 +24,7 @@ class Wavelet:
         self._time_shifted = self._time - self._central_time_sec                        # Массив времени, центрированный вокруг t_0
         self._sigma = self._num_cycles / (2 * np.pi * self._dom_freq)                     # Стандартное отклонение
 
-        self.file_path = 'coefficients.bln'
+        self.file_path = "C:\\Users\\ALEKS\\copy\\coefficients.bln"
         
     @property
     def signal_length(self):
@@ -160,6 +160,7 @@ class Wavelet:
         
         wavelet_list = ['ricker'] + \
             [f"morlet{n}" for n in range(1, 4)] + \
+            [f"gaus{n}" for n in range(1, 9, 1)] + \
             [f"db{n}" for n in range(4, 21, 2)] + \
             [f"sym{n}" for n in range(4, 21, 2)] + \
             [f"coif{n}" for n in range(4, 17, 2)]
@@ -292,7 +293,7 @@ class Wavelet:
 
 if __name__ == "__main__":
     
-    app = Wavelet("sym4")              # передаем название вейвлета
+    app = Wavelet("gaus8")              # передаем название вейвлета
     
     graph = app.generate_wavelet()      # построение вейвлета
     plt.plot(graph)

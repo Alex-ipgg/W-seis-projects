@@ -1,19 +1,13 @@
-import os
-import numpy as np
-import matplotlib.pyplot as plt
-from scipy.special import hermitenorm
-
-
 class Wavelet:
     
     def __init__(self, wavelet_name):
         
         self._wavelet_name = wavelet_name.lower()
-        self._signal_length = 2400   # длина записи в мс
+        self._signal_length = 2000   # длина записи в мс
         self._sample_rate = 2        # шаг выборки в мс
         self._central_time = 1000    # центральное время импульса в мс
         self._dom_freq = 10          # центральная частота в Гц
-        self._num_cycles = 6           # кол-во циклов
+        self._num_cycles = 10        # кол-во циклов
         
         # Преобразование значений в секунды
         self._signal_length_sec = self._signal_length / 1000.0
@@ -22,7 +16,7 @@ class Wavelet:
 
         self._time = np.arange(0, self._signal_length_sec, self._sample_rate_sec)       # Массив времени
         self._time_shifted = self._time - self._central_time_sec                        # Массив времени, центрированный вокруг t_0
-        self._sigma = self._num_cycles / (2 * np.pi * self._dom_freq)                     # Стандартное отклонение
+        self._sigma = self._num_cycles / (2 * np.pi * self._dom_freq)                   # Стандартное отклонение
 
         self.file_path = "C:\\Users\\ALEKS\\copy\\coefficients.bln"
         
@@ -36,7 +30,6 @@ class Wavelet:
     def signal_length(self, value):
         
         self._signal_length = value
-        self._update_dependent_variables()
 
     @property
     def sample_rate(self):
@@ -48,7 +41,6 @@ class Wavelet:
     def sample_rate(self, value):
         
         self._sample_rate = value
-        self._update_dependent_variables()
 
     @property
     def central_time(self):
@@ -60,7 +52,6 @@ class Wavelet:
     def central_time(self, value):
         
         self._central_time = value
-        self._update_dependent_variables()
     
     @property
     def dom_freq(self):
@@ -72,7 +63,6 @@ class Wavelet:
     def dom_freq(self, value):
         
         self._dom_freq = value
-        self._update_dependent_variables()
     
     @property
     def num_cycles(self):
@@ -84,7 +74,6 @@ class Wavelet:
     def num_cycles(self, value):
         
         self._num_cycles = value
-        self._update_dependent_variables()
     
     @property
     def signal_length_sec(self):
@@ -116,11 +105,21 @@ class Wavelet:
         
         return self._time_shifted
 
+    @time_shifted.setter
+    def time_shifted(self, value):
+        
+        self._time_shifted = value
+    
     @property
     def sigma(self):
         """Стандартное отклонение."""
         
         return self._sigma
+
+    @sigma.setter
+    def sigma(self, value):
+        
+        self._sigma = value
 
     def generate_wavelet(self):
         """Генерирует вейвлет в соответствии с заданным названием."""
@@ -175,8 +174,8 @@ class Wavelet:
             ricker (numpy.ndarray): Вейвлет Рикера.
         """
         
-        pi_fm_t = np.pi * self.dom_freq * (self.time - self.central_time_sec)
-        ricker = (1 - 2 * (pi_fm_t) ** 2) * np.exp(-(pi_fm_t) ** 2)
+        ricker = (1 - (self.time_shifted ** 2) / self.sigma ** 2) * np.exp(-(self.time_shifted ** 2) / (2 * self.sigma ** 2))
+        
         return ricker
 
     def morlet(self):
@@ -290,10 +289,3 @@ class Wavelet:
                     return np.array(data[key])
 
         raise ValueError(f"Коэффициенты для {key} не найдены.")
-
-if __name__ == "__main__":
-    
-    app = Wavelet("gaus8")              # передаем название вейвлета
-    
-    graph = app.generate_wavelet()      # построение вейвлета
-    plt.plot(graph)

@@ -1,3 +1,11 @@
+import scipy
+import numpy as np
+from math import ceil, floor
+from scipy.signal import convolve
+from scipy.special import hermitenorm
+from scipy.interpolate import interp1d
+from scipy.fft import fft, ifft, next_fast_len
+
 class CWT:
     def __init__(self, scales=None, frequencies=None, wavelet='gaus1', sampling_period=1.0, method='fft', axis=-1, bfreq=500):
         # Проверка параметра 'bfreq'

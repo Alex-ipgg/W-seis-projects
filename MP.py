@@ -1,24 +1,20 @@
 import numpy as np
 import matplotlib.pyplot as plt
 
-
 class MatchingPursuit:
     """
     Класс для выполнения алгоритма Matching Pursuit и визуализации результатов с использованием распределения Вигнера-Вилля.
-
     Входные данные:
-        trace (ndarray): Исходный сигнал для анализа.
-        wavelets (list): Список вейвлетов для разложения.
-        atoms (list): Список найденных атомов в виде (параметры, амплитуда).
+    trace (ndarray): Исходный сигнал для анализа.
+    wavelets (list): Список вейвлетов для разложения.
     """
 
     def __init__(self, trace, wavelets):
         """
         Инициализация объекта MatchingPursuit.
-
         Параметры:
-            trace (ndarray): Анализируемый сигнал.
-            wavelets (list): Набор вейвлетов для разложения.
+        trace (ndarray): Анализируемый сигнал.
+        wavelets (list): Набор вейвлетов для разложения.
         """
         # Параметры по умолчанию
         self._sample_rate = 1  # Частота дискретизации (Гц)
@@ -30,14 +26,13 @@ class MatchingPursuit:
 
         # Инициализация рабочих параметров
         self.num = len(wavelets)  # Количество вейвлетов
-        self.wavelets = wavelets  # Нормализованные вейвлеты
+        self.wavelets = [w / np.linalg.norm(w) for w in wavelets]
         self.trace = trace  # Исходный сигнал
-        self.wavelet_freqs = np.linspace(
-            self._f_min, self._f_max, self.num
-        )  # Частоты вейвлетов
-        self.atoms = []  # Список найденных атомов
+        self.lenth = len(self.trace)
+        self.wavelet_lenth = len(self.wavelets[0])
+        self.wavelet_freqs = np.linspace(self._f_min, self._f_max, self.num)  # Частоты вейвлетов
+        self.t_grid = np.linspace(0, self.lenth * self.sample_rate / 1000, self.lenth)
 
-    # Блок свойств (properties) с валидацией значений
     @property
     def sample_rate(self):
         return self._sample_rate
@@ -47,7 +42,8 @@ class MatchingPursuit:
         if value <= 0:
             raise ValueError("Sample rate must be positive.")
         self._sample_rate = value
-
+        self._update_time_grid()
+        
     @property
     def f_min(self):
         return self._f_min
@@ -57,7 +53,7 @@ class MatchingPursuit:
         if value < 0:
             raise ValueError("Minimum frequency must be non-negative.")
         self._f_min = value
-        self._update_wavelet_freqs()  # Обновляем wavelet_freqs при изменении f_min
+        self._update_wavelet_freqs()
 
     @property
     def f_max(self):
@@ -66,11 +62,9 @@ class MatchingPursuit:
     @f_max.setter
     def f_max(self, value):
         if value <= self._f_min:
-            raise ValueError(
-                "Maximum frequency must be greater than minimum frequency."
-            )
+            raise ValueError("Maximum frequency must be greater than minimum frequency.")
         self._f_max = value
-        self._update_wavelet_freqs()  # Обновляем wavelet_freqs при изменении f_max
+        self._update_wavelet_freqs()
 
     @property
     def min_amplitude(self):
@@ -98,7 +92,7 @@ class MatchingPursuit:
 
     @max_iterations.setter
     def max_iterations(self, value):
-        if not isinstance(value, int):  # Проверка, что значение является целым числом
+        if not isinstance(value, int):
             raise ValueError("max_iterations must be an integer.")
         if value <= 0:
             raise ValueError("Maximum iterations must be positive.")
@@ -108,147 +102,62 @@ class MatchingPursuit:
         """Обновляет частоты вейвлетов при изменении f_min/f_max."""
         self.wavelet_freqs = np.linspace(self._f_min, self._f_max, self.num)
 
-    def matching_pursuit(self, min_amplitude=0.001, threshold=0.001, max_iterations=3):
+    def _update_time_grid(self):
+        """Обновляет время при изменении sample_rate."""
+        self.t_grid = np.linspace(0, self.lenth * self._sample_rate / 1000, self.lenth)
+
+    def _wigner_ville(self, params, omega_grid):
         """
-        Алгоритм Matching Pursuit для разложения сигнала на атомы.
-
-        Параметры:
-            min_amplitude (float): Минимальная амплитуда для учета атома.
-            threshold (float): Порог остаточной энергии для остановки.
-            max_iterations (int): Максимальное число итераций.
-
-        Возвращает:
-            list: Список атомов в виде [((позиция, длина, частота), амплитуда), ...]
+        Вычисление распределения Вигнера-Вилля для одного атома.
         """
-        # Нормализация вейвлетов
-        self.wavelets = [w / np.linalg.norm(w) for w in self.wavelets]
-        wavelet_lengths = [len(w) for w in self.wavelets]
+        u, s, nu = params
+        T, O = np.meshgrid(self.t_grid, omega_grid)
+        return 2 * np.exp(-2 * np.pi * ((T - u) ** 2 / s**2 + (s**2 * (O - nu) ** 2)))
 
-        tr = np.copy(self.trace)  # Копия сигнала для модификации
-        self.atoms = []
+    def matching_pursuit_with_wigner_ville(self):
+        """
+        Алгоритм Matching Pursuit с одновременным расчетом распределения Вигнера-Вилля.
+        """
+        tr = np.copy(self.trace)
+        W_sum = np.zeros((len(self.wavelet_freqs), len(self.t_grid)))
+        residual_norm = np.linalg.norm(tr)
         iter_count = 0
-        residual_norm = np.linalg.norm(tr)  # Норма остатка
 
-        # Основной цикл алгоритма
-        while residual_norm > threshold and iter_count < max_iterations:
+        while residual_norm > self._threshold and iter_count < self._max_iterations:
             # Вычисление сверток сигнала со всеми вейвлетами
             convs = np.array([np.convolve(tr, w, mode="same") for w in self.wavelets])
-
-            # Поиск атома с максимальной корреляцией
             max_index = np.unravel_index(np.argmax(np.abs(convs)), convs.shape)
-            a = convs[max_index]  # Амплитуда атома
+            a = convs[max_index]
 
-            if np.abs(a) < min_amplitude:  # Проверка значимости амплитуды
+            if np.abs(a) < self._min_amplitude:
                 break
 
             # Извлечение параметров найденного атома
             wavelet_idx, pos = max_index
-            L = wavelet_lengths[wavelet_idx]  # Длина вейвлета
-            wavelet = self.wavelets[wavelet_idx]  # Форма вейвлета
-            frequency = self.wavelet_freqs[wavelet_idx]  # Частота
+            wavelet = self.wavelets[wavelet_idx]
+            frequency = self.wavelet_freqs[wavelet_idx]
 
-            # Расчет границ влияния атома в сигнале
-            i_s = pos - L // 2  # Начальный индекс
-            i_f = i_s + L  # Конечный индекс
-
-            # Корректировка границ при выходе за пределы массива
-            cut_start = 0
-            cut_end = 0
-            if i_s < 0:
-                cut_start = -i_s
-                i_s = 0
-            if i_f > len(tr):
-                cut_end = i_f - len(tr)
-                i_f = len(tr)
-
-            # Вырезание значимой части вейвлета
-            wavelet_segment = wavelet[cut_start : L - cut_end]
+            # Корректировка границ влияния атома
+            i_s = max(0, pos - self.wavelet_lenth // 2)
+            i_f = min(len(tr), i_s + self.wavelet_lenth)
+            wavelet_segment = wavelet[:i_f - i_s]
 
             # Вычитание вклада атома из сигнала
             tr[i_s:i_f] -= a * wavelet_segment
 
-            # Сохранение параметров атома
-            self.atoms.append(((pos, L, frequency), np.abs(a)))
+            # Расчет распределения Вигнера-Вилля для текущего атома
+            W = self._wigner_ville(
+                (self.t_grid[pos], self.wavelet_lenth * (self.t_grid[1] - self.t_grid[0]), frequency),
+                self.wavelet_freqs
+            )
+            W_sum += (np.abs(a) ** 2) * W
+
+            # Обновление нормы остатка
             residual_norm = np.linalg.norm(tr)
             iter_count += 1
 
         print(f"Iterations performed: {iter_count}")
-        return self.atoms
-
-    def wigner_ville(self, params, t_grid, omega_grid):
-        """
-        Вычисление распределения Вигнера-Вилля для одного атома.
-
-        Параметры:
-            params (tuple): Параметры атома (время, ширина, частота).
-            t_grid (ndarray): Временная сетка.
-            omega_grid (ndarray): Частотная сетка.
-
-        Возвращает:
-            ndarray: Распределение Вигнера-Вилля для атома.
-        """
-        u, s, nu = params
-        T, O = np.meshgrid(t_grid, omega_grid)
-        # Формула псевдо-распределения Вигнера-Вилля для гауссова атома
-        W = 2 * np.exp(-2 * np.pi * ((T - u) ** 2 / s**2 + (s**2 * (O - nu) ** 2)))
-        return W
-
-    def calculate_wigner_ville(self, atoms, t_grid, omega_grid):
-        """
-        Суммарное распределение Вигнера-Вилля для всех атомов.
-
-        Параметры:
-            atoms (list): Список атомов из matching_pursuit().
-            t_grid (ndarray): Временная сетка.
-            omega_grid (ndarray): Частотная сетка.
-
-        Возвращает:
-            ndarray: Суммарное распределение энергии.
-        """
-        W_sum = np.zeros((len(omega_grid), len(t_grid)))
-        dt = t_grid[1] - t_grid[0] if len(t_grid) > 1 else 0
-
-        for params, coeff in atoms:
-            # Преобразование параметров атома
-            atom_center, atom_width, atom_freq = params
-            u = t_grid[atom_center]  # Центр атома во времени
-            s = atom_width * dt  # Ширина атома в секундах
-            nu = atom_freq  # Центральная частота
-
-            # Расчет вклада атома и суммирование
-            W = self.wigner_ville((u, s, nu), t_grid, omega_grid)
-            W_sum += (np.abs(coeff) ** 2) * W  # Учет энергии атома
-
         return W_sum
-
-    def plot_spectrum(self):
-        """Визуализация спектральной плотности с помощью распределения Вигнера-Вилля."""
-        atoms = self.matching_pursuit(
-            self.min_amplitude, self.threshold, self.max_iterations
-        )
-        omega_grid = np.linspace(self.f_min, self.f_max, self.num)
-
-        # Построение временной оси
-        t = np.linspace(0, len(self.trace) * self.sample_rate / 1000, len(self.trace))
-
-        # Расчет распределения
-        W_sum = self.calculate_wigner_ville(atoms, t, omega_grid)
-
-        # Настройка графика
-        plt.figure(figsize=(12, 6))
-        plt.imshow(
-            W_sum,
-            aspect="auto",
-            origin="lower",
-            extent=[t[0], t[-1], omega_grid[0], omega_grid[-1]],
-            cmap="seismic",
-        )  # Цветовая карта 'seismic'
-        plt.colorbar(label="Энергия")
-        plt.xlabel("Время, с")
-        plt.ylabel("Частота, Гц")
-        plt.title("MP")
-        plt.show()
-
 
 # Пример использования
 signal = np.loadtxt("copy/signal.txt")  # Загрузка сигнала
@@ -256,4 +165,23 @@ wavelets_s = np.loadtxt("ricker_wavelets.txt")  # Загрузка вейвле�
 wavelets = [v / np.linalg.norm(v) if np.linalg.norm(v) != 0 else v for v in wavelets_s]
 
 app = MatchingPursuit(signal, wavelets)
-app.plot_spectrum()
+W_sum = app.matching_pursuit_with_wigner_ville()
+
+sample_rate = 1
+t_grid = np.linspace(0, len(signal) * sample_rate / 1000, len(signal))
+wavelet_freqs = np.linspace(0, 100, 100)
+
+# Настройка графика
+plt.figure(figsize=(12, 6))
+plt.imshow(
+    W_sum,
+    aspect="auto",
+    origin="lower",
+    extent=[t_grid[0], t_grid[-1], wavelet_freqs[0], wavelet_freqs[-1]],
+    cmap="seismic",
+)
+plt.colorbar(label="Энергия")
+plt.xlabel("Время, с")
+plt.ylabel("Частота, Гц")
+plt.title("MP")
+plt.show()

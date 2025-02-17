@@ -106,14 +106,6 @@ class MatchingPursuit:
         """Обновляет время при изменении sample_rate."""
         self.t_grid = np.linspace(0, self.lenth * self._sample_rate / 1000, self.lenth)
 
-    def _wigner_ville(self, params, omega_grid):
-        """
-        Вычисление распределения Вигнера-Вилля для одного атома.
-        """
-        u, s, nu = params
-        T, O = np.meshgrid(self.t_grid, omega_grid)
-        return 2 * np.exp(-2 * np.pi * ((T - u) ** 2 / s**2 + (s**2 * (O - nu) ** 2)))
-
     def matching_pursuit_with_wigner_ville(self):
         """
         Алгоритм Matching Pursuit с одновременным расчетом распределения Вигнера-Вилля.
@@ -122,43 +114,45 @@ class MatchingPursuit:
         W_sum = np.zeros((len(self.wavelet_freqs), len(self.t_grid)))
         residual_norm = np.linalg.norm(tr)
         iter_count = 0
-
+    
         while residual_norm > self._threshold and iter_count < self._max_iterations:
             # Вычисление сверток сигнала со всеми вейвлетами
             convs = np.array([np.convolve(tr, w, mode="same") for w in self.wavelets])
             max_index = np.unravel_index(np.argmax(np.abs(convs)), convs.shape)
             a = convs[max_index]
-
+    
             if np.abs(a) < self._min_amplitude:
                 break
-
+    
             # Извлечение параметров найденного атома
             wavelet_idx, pos = max_index
             wavelet = self.wavelets[wavelet_idx]
             frequency = self.wavelet_freqs[wavelet_idx]
-
+    
             # Корректировка границ влияния атома
             i_s = max(0, pos - self.wavelet_lenth // 2)
             i_f = min(len(tr), i_s + self.wavelet_lenth)
             wavelet_segment = wavelet[:i_f - i_s]
-
+    
             # Вычитание вклада атома из сигнала
             tr[i_s:i_f] -= a * wavelet_segment
-
+    
             # Расчет распределения Вигнера-Вилля для текущего атома
-            W = self._wigner_ville(
-                (self.t_grid[pos], self.wavelet_lenth * (self.t_grid[1] - self.t_grid[0]), frequency),
-                self.wavelet_freqs
-            )
+            T, O = np.meshgrid(self.t_grid, self.wavelet_freqs)
+            W = 2 * np.exp(-2 * np.pi * (
+                ((T - self.t_grid[pos]) ** 2 / (self.wavelet_lenth * (self.t_grid[1] - self.t_grid[0]))**2) +
+                ((self.wavelet_lenth * (self.t_grid[1] - self.t_grid[0]))**2 * (O - frequency) ** 2)
+            ))
+    
             W_sum += (np.abs(a) ** 2) * W
-
+    
             # Обновление нормы остатка
             residual_norm = np.linalg.norm(tr)
             iter_count += 1
-
+    
         print(f"Iterations performed: {iter_count}")
         return W_sum
-
+        
 # Пример использования
 signal = np.loadtxt("copy/signal.txt")  # Загрузка сигнала
 wavelets_s = np.loadtxt("ricker_wavelets.txt")  # Загрузка вейвлетов Рикера

@@ -14,40 +14,43 @@ from sklearn.metrics import mean_squared_error
 
 class Prony:
     def __init__(self, traces):
+        
         # Общие параметры
-        self._sample_rate = 2  # шаг дискретизации
         self._method = 0  # 0 - LSM, 1 - MP
         self._num_terms = (
             0  # Количество синусоид для разложения в окне (0 - автоподбор)
         )
         self._win_size = 0  # Ширина окна в дискретах (0 - автоподбор)
-        self._singular_number = 0  # Сингулярное число для MP
         self._task = 1  # 0 - фильтрация, 1 - трасса атрибутов
         self._shift = 1  # Сдвиг окна (если 0, то сдвиг на ширину окна)
-
+        self._singular_number = 0  # Сингулярное число для MP
+        self._regularization_lambda = 0.0  # Параметр регуляризации
+        
         # Параметры фильтрации
         self._filt_freq = 20  # Доминантная частота для фильтрации
         self._spread = 10  # Ширина фильтрации (от self.spread - self.num_terms до self.spread + self.num_terms)
-        self._limit = 1.5
 
-        # Параметры атрибутов
-        self._attribute = 0  # Трасса из: 0 - затухания, 1 - частоты, 2 - амплитуды, 3 - фазы, 4 - добротности
-
+        self._sample_rate = 2  # шаг дискретизации
+        
         # Дальше не менять
         self.traces = np.array(traces, dtype=np.float64)
+        del traces
         self.nsamp = len(self.traces[0])
         self.num_traces = len(self.traces)
         self.coef = [1000, 1000, 2, 1]
 
+        self.damp_g = self.create_dict(1, 200)
+        self.damp_f = self.create_dict(1, 200)
+        self.freq_g = self.create_dict(1, 200)
+        self.freq_f = self.create_dict(1, 200)
+        self.phase_g = self.create_dict(0.01, np.pi)
+        self.phase_f = self.create_dict(0.01, np.pi)
+        self.amp_g = self.create_dict(1, 200)
+        self.amp_f = self.create_dict(1, 200)
+        
         self._update_dependent_variables()
 
     def _update_dependent_variables(self):
-        """
-        Описание : Обновляет зависимые переменные на основе текущих значений параметров.
-        Действие :
-        Пересчитывает такие параметры, как сдвиг окна (_shift), половину ширины окна (half_window), максимальный индекс для обработки (max_index) и перекрытие окон (_overlay).
-        """
-
         self._method_str = (
             "prony_decomposition_least_squares"
             if self._method == 0
@@ -57,6 +60,18 @@ class Prony:
         self.half_window = self._win_size // 2
         self.max_index = self.nsamp - self._win_size + 1
         self._overlay = self._win_size - self._shift
+
+    @property
+    def regularization_lambda(self):
+        return self._regularization_lambda
+
+    @regularization_lambda.setter
+    def regularization_lambda(self, value):
+        if value >= 0:
+            self._regularization_lambda = value
+            self._update_dependent_variables()  # Исправлена опечатка
+        else:
+            raise ValueError("Regularization lambda must be non-negative")
 
     @property
     def sample_rate(self):
@@ -148,18 +163,6 @@ class Prony:
             raise ValueError("Overlay must be non-negative")
 
     @property
-    def limit(self):
-        return self._limit
-
-    @limit.setter
-    def limit(self, value):
-        if value > 0:
-            self._limit = value
-            self._update_dependent_variables()
-        else:
-            raise ValueError("Limit must be greater than 0")
-
-    @property
     def task(self):
         return self._task
 
@@ -207,124 +210,96 @@ class Prony:
         else:
             raise ValueError("Singular number must be non-negative")
 
+    @property
+    def calc_intervals(self):
+        return self._calc_intervals
+    
+    @calc_intervals.setter
+    def calc_intervals(self, value):
+        if isinstance(value, bool):
+            self._calc_intervals = value
+            self._update_dependent_variables()
+        else:
+            raise ValueError("Calc intervals must be a boolean")
+
     def prony_decomposition_least_squares(self, data):
-        """
-        Описание : Выполняет разложение сигнала методом наименьших квадратов.
-        Параметры :
-        data: Входной сигнал.
-        Возвращает :
-        Коэффициенты затухания, частоты, амплитуды и фазы.
-        """
-
-        data = data.tolist()
+        data = np.asarray(data, dtype=np.float64)
         nsamp = len(data)
-
-        toeplitz_matrix = np.asarray(
-            toeplitz(
-                data[self.num_terms - 1 : nsamp - 1 : 1],
-                data[self.num_terms - 1 : 0 : -1] + [data[0]],
-            )
-        )
-        a = -1 * np.dot(
-            np.dot(
-                inv(np.dot(toeplitz_matrix.transpose(), toeplitz_matrix)),
-                toeplitz_matrix.transpose(),
-            ),
-            np.asarray(data[self.num_terms : -1 : 1] + [data[(-1)]]),
-        )
-        coef_toep = np.concatenate((np.array([1]), a))
+        p = self._num_terms
+        
+        col = data[p-1 : nsamp-1]  # Столбец: элементы с p-1 до предпоследнего
+        row = data[p-1::-1]        # Строка: элементы с p-1 до 0 в обратном порядке
+        toeplitz_matrix = toeplitz(col, row)
+        
+        X = toeplitz_matrix
+        XTX = X.T @ X
+        
+        # Добавление регуляризации Тихонова
+        reg_matrix = XTX + self._regularization_lambda * np.eye(X.shape[1])
+        
+        try:
+            a = -np.linalg.inv(reg_matrix) @ X.T @ data[p:]
+        except LinAlgError:
+            raise Exception("Singular matrix. Check the window size and the number of terms")
+            
+        coef_toep = np.concatenate(([1], a))
         roots = np.roots(coef_toep)
-
-        damping_factor = np.log(np.abs(roots)) / self.sample_rate
-
-        frequency = np.arctan2(roots.imag, roots.real) / (2 * np.pi * self.sample_rate)
-
-        vandermonde_matrix = np.vander(roots, increasing=True).transpose()
-
-        coef_vander = np.dot(
-            np.dot(
-                inv(np.dot(vandermonde_matrix.transpose(), vandermonde_matrix)),
-                vandermonde_matrix.transpose(),
-            ),
-            np.asarray(data[0 : self.num_terms]),
-        )
-
+        
+        damping = np.log(np.abs(roots)) / self._sample_rate
+        freq = np.arctan2(roots.imag, roots.real) / (2 * np.pi * self._sample_rate)
+        
+        vander = np.vander(roots, increasing=True, N=p).T
+        coef_vander = np.linalg.lstsq(vander, data[:p], rcond=None)[0]
+        
         amplitude = np.abs(coef_vander)
-
         phase = np.arctan2(coef_vander.imag, coef_vander.real)
-
-        return damping_factor, frequency, amplitude, phase
-
+        
+        return damping, freq, amplitude, phase
+        
     def prony_decomposition_matrix_pencil(self, data):
-        """
-        Описание : Выполняет разложение сигнала методом матричного пучка.
-        Параметры :
-        data: Входной сигнал.
-        Возвращает :
-        Коэффициенты затухания, частоты, амплитуды и фазы.
-        """
-
         data = data.tolist()
         nsamp = len(data)
-
-        hankel_matrix = np.asarray(
-            hankel(
-                data[0 : nsamp - self.num_terms : 1],
-                data[nsamp - self.num_terms - 1 : nsamp : 1],
-            )
-        )  # First column and last row of the matrix
-        # print(hankel_matrix.shape)
-        nlines, ncols = hankel_matrix.shape
-
-        hankel_matrix_1 = hankel_matrix[:, 0 : ncols - 1]
-
-        hankel_matrix_2 = hankel_matrix[:, 1:ncols]
-
-        eigenvalues, right_eigenvectors = eig(
-            np.dot(pinv(hankel_matrix_1), hankel_matrix_2)
-        )
-
+        
+        hankel_matrix = hankel(data[:nsamp - self.num_terms], 
+                               data[nsamp - self.num_terms - 1:])
+        hankel_matrix_1 = hankel_matrix[:, :-1]
+        hankel_matrix_2 = hankel_matrix[:, 1:]
+        
+        H1 = hankel_matrix_1
+        
+        try:
+            H1_pinv = np.linalg.inv(H1.T @ H1 + self._regularization_lambda * np.eye(H1.shape[1])) @ H1.T
+        except LinAlgError:
+            raise Exception("Singular matrix. Check the window size and the number of terms")
+        
+        matrix_product = H1_pinv @ hankel_matrix_2
+        
+        eigenvalues = np.linalg.eigvals(matrix_product)
         damping_factor = np.log(np.abs(eigenvalues)) / self.sample_rate
-
-        frequency = np.arctan2(eigenvalues.imag, eigenvalues.real) / (
-            2 * np.pi * self.sample_rate
-        )
-
+        frequency = np.arctan2(eigenvalues.imag, eigenvalues.real) / (2 * np.pi * self.sample_rate)
+        
         vandermonde_matrix = np.vander(eigenvalues, increasing=True).transpose()
-
-        coef_vander = np.dot(
-            self._fil_Singular_matrix(data=vandermonde_matrix),
-            np.asarray(data[0 : self.num_terms : 1]),
-        )
-
+        coef_vander = np.linalg.lstsq(vandermonde_matrix, data[:self.num_terms], rcond=None)[0]
+        
         amplitude = np.abs(coef_vander)
-
         phase = np.arctan2(coef_vander.imag, coef_vander.real)
-
+        
         return damping_factor, frequency, amplitude, phase
-
-    def _fil_Singular_matrix(self, data):
-        """
-        Описание : Вычисляет псевдообратную матрицу с использованием сингулярного разложения.
-        Параметры :
-        data: Матрица данных.
-        Возвращает :
-        Псевдообратную матрицу.
-        """
-
+    
+    def fil_Singular_matrix(self, data):
         U, S, Vh = np.linalg.svd(data)
-
+        
         # Создаем булевый массив-маску для больших сингулярных значений
         mask = S > self.singular_number
-
+        
         # Инвертируем только большие сингулярные значения
         S_inv = np.zeros_like(S)
         S_inv[mask] = 1 / S[mask]
-
+        
         # Вычисляем псевдообратную матрицу, используя инвертированные сингулярные значения
         # и соответствующие сингулярные векторы
         data_pinv = Vh.T @ (S_inv[:, np.newaxis] * U.T)
-
+        
         # При необходимости берем комплексное сопряжение
         return data_pinv.conjugate()
 
@@ -443,9 +418,13 @@ class Prony:
         mask = (np.abs(freq) * 1000 >= self.filt_freq - self.spread) & (
             np.abs(freq) * 1000 <= self.filt_freq + self.spread
         )
-
+        damping_factor = damping[mask]
+        frequency = freq[mask]
+        amplitude = amp[mask]
+        phase = phase[mask]
+            
         return self.prony_approximation(
-            len(data), damping[mask], freq[mask], amp[mask], phase[mask]
+            len(data), damping_factor, frequency, amplitude, phase
         ).real
 
     def apply_prony_filter(self, data):
@@ -462,6 +441,7 @@ class Prony:
 
         if self.win_size == 0:
             damping_factor, frequency, amplitude, phase = method_func(data)
+                
             c_trace[:] = self.filter_prony_components(
                 data, damping_factor, frequency, amplitude, phase
             )
@@ -473,6 +453,7 @@ class Prony:
                 n_trace = data[a : a + self.win_size]
 
                 damping_factor, frequency, amplitude, phase = method_func(n_trace)
+                    
                 S = self.filter_prony_components(
                     n_trace, damping_factor, frequency, amplitude, phase
                 )
@@ -596,11 +577,12 @@ class Prony:
         Возвращает:
         Результат обработки в виде матрицы отфильтрованных сигналов или набора матриц атрибутов.
         """
-
+        
         # Определение постоянных трасс
         first_elements = self.traces[:, 0]
         constant_mask = np.all(self.traces == first_elements[:, None], axis=1)
         self.non_constant_indices = np.where(~constant_mask)[0]
+        
         if not self.non_constant_indices.size:
             ind = self.num_traces // 2
         else:
@@ -645,6 +627,7 @@ class Prony:
                     )
                     result = func(trace)
                 return result
+            
             except Exception as e:
                 warnings.warn(f"Error in trace {idx}: {e}")
                 return (
